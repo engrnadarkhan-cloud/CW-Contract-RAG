@@ -2,8 +2,7 @@ import os
 import pickle
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-# Fixed import path for Streamlit Cloud compatibility
-from langchain.retrievers.ensemble import EnsembleRetriever
+from langchain.retrievers import EnsembleRetriever
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
