@@ -1,8 +1,7 @@
-streamlit==1.33.0
-langchain==0.1.16
-langchain-core==0.1.45
-langchain-community==0.0.34
-langchain-google-genai==1.0.3
-langchain-huggingface==0.1.2
-faiss-cpu==1.8.0.post1
-sentence-transformers==2.7.0
+streamlit
+langchain
+langchain-community
+langchain-google-genai
+langchain-huggingface
+faiss-cpu
+sentence-transformers
