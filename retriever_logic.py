@@ -8,12 +8,9 @@ import streamlit as st
 
 @st.cache_resource
 def load_retrievers():
-    # Load HuggingFace Embeddings model (runs smoothly on Cloud)
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    
     documents = []
     
-    # Target the two specific PDFs on GitHub root
     pdf_files = ["KPPRA_Rules.pdf", "FIDIC_Conditions.pdf"]
     
     for file in pdf_files:
@@ -21,12 +18,10 @@ def load_retrievers():
             loader = PyPDFLoader(file)
             docs = loader.load()
             for doc in docs:
-                # Add source tagging for transparency
                 doc.metadata['document_name'] = file
                 doc.metadata['source_type'] = "FIDIC" if "fidic" in file.lower() else "KPPRA"
             documents.extend(docs)
             
-    # Fallback search if exact names differ slightly
     if not documents:
         for file in os.listdir("."):
             if file.lower().endswith(".pdf"):
@@ -40,7 +35,6 @@ def load_retrievers():
     if not documents:
         raise ValueError("❌ Error: No PDF files found in the repository root.")
 
-    # Optimized Chunking for Contract Clauses
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1200, 
         chunk_overlap=250,
@@ -48,11 +42,9 @@ def load_retrievers():
     )
     chunks = text_splitter.split_documents(documents)
     
-    # Build in-memory FAISS Vector Store
     vectorstore = FAISS.from_documents(chunks, embeddings)
     return vectorstore.as_retriever(search_kwargs={"k": 5})
 
-# Custom RAG Chain to bypass any external version dependency issues
 class CustomRAGChain:
     def __init__(self, llm, retriever):
         self.llm = llm
@@ -61,16 +53,13 @@ class CustomRAGChain:
     def invoke(self, inputs):
         query = inputs["input"]
         
-        # Retrieve relevant chunks
         if hasattr(self.retriever, "invoke"):
             docs = self.retriever.invoke(query)
         else:
             docs = self.retriever.get_relevant_documents(query)
             
-        # Format context for Gemini
         context = "\n\n".join([f"Document Source: {d.metadata.get('document_name', 'Unknown')}\n{d.page_content}" for d in docs])
         
-        # Domain-specific C&W KPK System Prompt
         prompt = f"""You are an Expert Contract Administrator and Legal Assistant for the Communication & Works (C&W) Department, KPK. 
 You answer questions based strictly on the provided context which includes KPPRA Rules and FIDIC Conditions of Contract.
 
@@ -95,8 +84,9 @@ User Query: {query}"""
         }
 
 def setup_rag_chain(api_key, retriever):
+    # Updated to Gemini 3.8 Flash
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash", 
+        model="gemini-3.8-flash", 
         temperature=0.1, 
         google_api_key=api_key
     )
