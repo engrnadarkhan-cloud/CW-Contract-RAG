@@ -8,39 +8,51 @@ import streamlit as st
 
 @st.cache_resource
 def load_retrievers():
-    # 1. Direct PDFs se text load karo jo GitHub par mojood hain
-    # (Apne GitHub folder me check kar lein ke PDFs ka naam yehi hai ya unki jagah sahi path hai)
-    pdf_files = ["KPPRA_Rules.pdf", "FIDIC_Conditions.pdf"] 
+    # Load HuggingFace Embeddings model (runs smoothly on Cloud)
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    
     documents = []
     
-    for path in pdf_files:
-        if os.path.exists(path):
-            loader = PyPDFLoader(path)
+    # Target the two specific PDFs on GitHub root
+    pdf_files = ["KPPRA_Rules.pdf", "FIDIC_Conditions.pdf"]
+    
+    for file in pdf_files:
+        if os.path.exists(file):
+            loader = PyPDFLoader(file)
             docs = loader.load()
             for doc in docs:
-                doc.metadata['document_name'] = path
+                # Add source tagging for transparency
+                doc.metadata['document_name'] = file
+                doc.metadata['source_type'] = "FIDIC" if "fidic" in file.lower() else "KPPRA"
             documents.extend(docs)
             
-    # Fallback agar file name thora mukhtalif ho
+    # Fallback search if exact names differ slightly
     if not documents:
         for file in os.listdir("."):
-            if file.endswith(".pdf"):
+            if file.lower().endswith(".pdf"):
                 loader = PyPDFLoader(file)
                 docs = loader.load()
                 for doc in docs:
                     doc.metadata['document_name'] = file
+                    doc.metadata['source_type'] = "General"
                 documents.extend(docs)
 
-    # 2. Chunking
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=250)
+    if not documents:
+        raise ValueError("❌ Error: No PDF files found in the repository root.")
+
+    # Optimized Chunking for Contract Clauses
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1200, 
+        chunk_overlap=250,
+        separators=["\n\n", "\n", "Clause", "Rule", ".", " "]
+    )
     chunks = text_splitter.split_documents(documents)
     
-    # 3. Direct Memory me Vector Store banana (No local file read error!)
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    # Build in-memory FAISS Vector Store
     vectorstore = FAISS.from_documents(chunks, embeddings)
-    
     return vectorstore.as_retriever(search_kwargs={"k": 5})
 
+# Custom RAG Chain to bypass any external version dependency issues
 class CustomRAGChain:
     def __init__(self, llm, retriever):
         self.llm = llm
@@ -48,18 +60,27 @@ class CustomRAGChain:
         
     def invoke(self, inputs):
         query = inputs["input"]
-        docs = self.retriever.invoke(query) if hasattr(self.retriever, "invoke") else self.retriever.get_relevant_documents(query)
         
-        context = "\n\n".join([f"Document: {d.metadata.get('document_name', 'Unknown')}\n{d.page_content}" for d in docs])
+        # Retrieve relevant chunks
+        if hasattr(self.retriever, "invoke"):
+            docs = self.retriever.invoke(query)
+        else:
+            docs = self.retriever.get_relevant_documents(query)
+            
+        # Format context for Gemini
+        context = "\n\n".join([f"Document Source: {d.metadata.get('document_name', 'Unknown')}\n{d.page_content}" for d in docs])
         
+        # Domain-specific C&W KPK System Prompt
         prompt = f"""You are an Expert Contract Administrator and Legal Assistant for the Communication & Works (C&W) Department, KPK. 
 You answer questions based strictly on the provided context which includes KPPRA Rules and FIDIC Conditions of Contract.
 
 Follow these strict rules:
-1. DIAGNOSE THE PHASE: First, determine if the query is about 'Tendering/Procurement' or 'Execution/Site'.
-2. CHOOSE THE LAW: Apply KPPRA Rules for Procurement. Apply FIDIC for Execution/Site.
-3. CITE YOUR SOURCES: Explicitly state the Rule Number or Clause Number.
-4. NO HALLUCINATION: If not in context, state: 'This is not covered in the provided KPPRA or FIDIC documents.'
+1. DIAGNOSE THE PHASE: First, determine if the user's query is about the 'Tendering/Procurement' phase or the 'Execution/Site' phase.
+2. CHOOSE THE LAW: 
+   - For Tendering/Procurement queries, apply KPPRA Rules.
+   - For Execution/Site queries, apply FIDIC Conditions of Contract.
+3. CITE YOUR SOURCES: You must explicitly state the Rule Number (for KPPRA) or Clause Number (for FIDIC) in your answer.
+4. NO HALLUCINATION: If the exact answer is not in the provided context, clearly state: 'This is not covered in the provided KPPRA or FIDIC documents.' Do not guess.
 
 Context: 
 {context}
@@ -67,6 +88,7 @@ Context:
 User Query: {query}"""
 
         response = self.llm.invoke(prompt)
+        
         return {
             "answer": response.content,
             "context": docs
