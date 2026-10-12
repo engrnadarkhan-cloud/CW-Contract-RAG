@@ -19,7 +19,6 @@ def load_retrievers():
             docs = loader.load()
             for doc in docs:
                 doc.metadata['document_name'] = file
-                doc.metadata['source_type'] = "FIDIC" if "fidic" in file.lower() else "KPPRA"
             documents.extend(docs)
             
     if not documents:
@@ -29,17 +28,12 @@ def load_retrievers():
                 docs = loader.load()
                 for doc in docs:
                     doc.metadata['document_name'] = file
-                    doc.metadata['source_type'] = "General"
                 documents.extend(docs)
 
     if not documents:
-        raise ValueError("❌ Error: No PDF files found in the repository root.")
+        raise ValueError("❌ Error: No PDF files found in repository root.")
 
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1200, 
-        chunk_overlap=250,
-        separators=["\n\n", "\n", "Clause", "Rule", ".", " "]
-    )
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=250)
     chunks = text_splitter.split_documents(documents)
     
     vectorstore = FAISS.from_documents(chunks, embeddings)
@@ -64,27 +58,35 @@ class CustomRAGChain:
 You answer questions based strictly on the provided context which includes KPPRA Rules and FIDIC Conditions of Contract.
 
 Follow these strict rules:
-1. DIAGNOSE THE PHASE: First, determine if the user's query is about the 'Tendering/Procurement' phase or the 'Execution/Site' phase.
-2. CHOOSE THE LAW: 
-   - For Tendering/Procurement queries, apply KPPRA Rules.
-   - For Execution/Site queries, apply FIDIC Conditions of Contract.
-3. CITE YOUR SOURCES: You must explicitly state the Rule Number (for KPPRA) or Clause Number (for FIDIC) in your answer.
-4. NO HALLUCINATION: If the exact answer is not in the provided context, clearly state: 'This is not covered in the provided KPPRA or FIDIC documents.' Do not guess.
+1. DIAGNOSE THE PHASE: First, determine if the query is about 'Tendering/Procurement' or 'Execution/Site'.
+2. CHOOSE THE LAW: Apply KPPRA Rules for Procurement. Apply FIDIC for Execution/Site.
+3. CITE YOUR SOURCES: Explicitly state the Rule Number or Clause Number.
+4. NO HALLUCINATION: If not in context, state: 'This is not covered in the provided KPPRA or FIDIC documents.'
 
 Context: 
 {context}
 
 User Query: {query}"""
 
-        response = self.llm.invoke(prompt)
+        # Direct AI invocation and robust text extraction
+        raw_response = self.llm.invoke(prompt)
         
+        # Ensure we extract pure string text, handling any dictionary/object wrapping
+        if hasattr(raw_response, "content"):
+            answer_text = raw_response.content
+        else:
+            answer_text = str(raw_response)
+            
+        # If it accidentally returns a list representation as string, clean it
+        if isinstance(answer_text, list):
+            answer_text = "".join([str(item) for item in answer_text])
+
         return {
-            "answer": response.content,
+            "answer": answer_text,
             "context": docs
         }
 
 def setup_rag_chain(api_key, retriever):
-    # Updated to Gemini 3.8 Flash
     llm = ChatGoogleGenerativeAI(
         model="gemini-3.8-flash", 
         temperature=0.1, 
