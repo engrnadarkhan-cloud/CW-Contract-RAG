@@ -54,7 +54,6 @@ class CustomRAGChain:
             
         context = "\n\n".join([f"Document Source: {d.metadata.get('document_name', 'Unknown')}\n{d.page_content}" for d in docs])
         
-        # Professional Executive System Prompt tailored for C&W KPK Engineering Leadership
         prompt = f"""You are a Senior Contract Administrator and Principal Legal Advisor for the Communication & Works (C&W) Department, Government of Khyber Pakhtunkhwa (KPK). 
 You are preparing a formal advisory report or instruction note for executive engineering leadership (such as Executive Engineers / XENs and Chief Engineers).
 
@@ -88,15 +87,26 @@ Context:
 
 User Query: {query}"""
 
-        raw_response = self.llm.invoke(prompt)
+        response = self.llm.invoke(prompt)
         
-        if hasattr(raw_response, "content"):
-            answer_text = raw_response.content
+        # Robust extraction: directly pulling text whether it's string, object, or list
+        if hasattr(response, "text"):
+            answer_text = response.text
+        elif hasattr(response, "content"):
+            answer_text = response.content
         else:
-            answer_text = str(raw_response)
+            answer_text = str(response)
             
+        # Clean up any dictionary or list artifact representation
         if isinstance(answer_text, list):
-            answer_text = "".join([str(item) for item in answer_text])
+            answer_text = "\n".join([str(item.get('text', item)) if isinstance(item, dict) else str(item) for item in answer_text])
+        elif isinstance(answer_text, str) and answer_text.startswith("{'type':"):
+            import ast
+            try:
+                parsed = ast.literal_eval(answer_text)
+                answer_text = parsed.get('text', answer_text)
+            except:
+                pass
 
         return {
             "answer": answer_text,
