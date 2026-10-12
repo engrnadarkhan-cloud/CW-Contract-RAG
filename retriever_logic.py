@@ -1,8 +1,6 @@
 import os
-import pickle
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.retrievers import EnsembleRetriever
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -11,31 +9,23 @@ import streamlit as st
 
 @st.cache_resource
 def load_retrievers():
-    # Defines the directory where the vector index and bm25 files are located
+    # Defines the directory where the vector index is located
     index_dir = "Index"
     
     # 1. Load Embeddings
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     
-    # 2. Load FAISS (Semantic Search)
+    # 2. Load Pure FAISS AI Search (Faster and completely Cloud Compatible)
     faiss_vectorstore = FAISS.load_local(
         f"{index_dir}/faiss_index", 
         embeddings, 
         allow_dangerous_deserialization=True
     )
-    faiss_retriever = faiss_vectorstore.as_retriever(search_kwargs={"k": 3})
     
-    # 3. Load BM25 (Keyword Search)
-    with open(f"{index_dir}/bm25_retriever.pkl", 'rb') as f:
-        bm25_retriever = pickle.load(f)
-    bm25_retriever.k = 3
+    # Fetch top 5 most relevant chunks instead of 3 for better context
+    faiss_retriever = faiss_vectorstore.as_retriever(search_kwargs={"k": 5})
     
-    # 4. Create Hybrid Retriever
-    ensemble_retriever = EnsembleRetriever(
-        retrievers=[bm25_retriever, faiss_retriever], 
-        weights=[0.5, 0.5]
-    )
-    return ensemble_retriever
+    return faiss_retriever
 
 def setup_rag_chain(api_key, retriever):
     # Using the fast Flash model for querying
